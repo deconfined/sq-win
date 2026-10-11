@@ -41,6 +41,8 @@ A daily schedule checks for new stable upstream versions. It skips an already co
 
 Resolution pins each tag to its exact commit. Each Windows job fetches that tag and rejects a changed commit. The jobs build on `windows-2022` for `x86_64-pc-windows-msvc`, using stable Rust, Windows CNG, bundled SQLite, and upstream Cargo lockfiles. Cap'n Proto's compiler is downloaded from its official site with a pinned SHA256. Hickory DNSSEC makes OpenSSL necessary even with CNG; vcpkg provides static OpenSSL libraries with the Microsoft dynamic C runtime. The ZIPs include the corresponding app-local Microsoft runtime DLLs.
 
+The action definitions are pinned to the latest stable releases verified on October 11, 2026: checkout 7.0.1, setup-python 7.0.0, upload-artifact 7.0.2, download-artifact 8.0.2, and cache 6.1.0. The workflow uses their exact commit SHAs and current input definitions. Rust build caches are separated by project, runner image, compiler and upstream source; static OpenSSL's binary cache is also retained. Projects that do not use OpenSSL skip that installation.
+
 Each component's executables are launched from its packaged directory with development directories removed from `PATH`. The assembly job requires every component and checks their provenance and binary hashes. It then tests:
 
 - SOP key generation, signing, encryption and decryption.

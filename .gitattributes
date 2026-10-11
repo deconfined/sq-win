@@ -1,2 +1,2 @@
 # Unified diffs contain significant whitespace in their context prefixes.
-*.patch -whitespace
+*.patch text eol=lf -whitespace

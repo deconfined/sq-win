@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$SkipOpenSsl
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -40,37 +42,48 @@ if ($LASTEXITCODE -ne 0) {
     throw "Cap'n Proto failed to start (exit code $LASTEXITCODE)."
 }
 
-# sequoia-net 0.30.1 selects Hickory's dnssec-openssl feature, independently
-# of the CNG OpenPGP backend. Link OpenSSL statically with the same dynamic
-# MSVC runtime used by the Rust target, so no OpenSSL DLLs need packaging.
-$vcpkgRoots = @($env:VCPKG_ROOT, $env:VCPKG_INSTALLATION_ROOT)
-$vcpkgCommand = Get-Command vcpkg.exe -ErrorAction SilentlyContinue
-if ($vcpkgCommand) {
-    $vcpkgRoots += Split-Path -Parent $vcpkgCommand.Source
-}
-$vcpkgRoot = $null
-foreach ($candidate in $vcpkgRoots) {
-    if ($candidate -and (Test-Path -LiteralPath (Join-Path $candidate 'vcpkg.exe') -PathType Leaf)) {
-        $vcpkgRoot = $candidate
-        break
+if (-not $SkipOpenSsl) {
+    # sequoia-net 0.30.1 selects Hickory's dnssec-openssl feature,
+    # independently of CNG. SOP, SQV and the keystore server do not need it.
+    # Static OpenSSL with the dynamic MSVC runtime needs no OpenSSL DLLs.
+    $vcpkgRoots = @($env:VCPKG_ROOT, $env:VCPKG_INSTALLATION_ROOT)
+    $vcpkgCommand = Get-Command vcpkg.exe -ErrorAction SilentlyContinue
+    if ($vcpkgCommand) {
+        $vcpkgRoots += Split-Path -Parent $vcpkgCommand.Source
     }
-}
-if (-not $vcpkgRoot) {
-    throw 'vcpkg.exe was not found. Use a GitHub-hosted Windows runner or set VCPKG_ROOT.'
-}
+    $vcpkgRoot = $null
+    foreach ($candidate in $vcpkgRoots) {
+        if ($candidate -and (Test-Path -LiteralPath (Join-Path $candidate 'vcpkg.exe') -PathType Leaf)) {
+            $vcpkgRoot = $candidate
+            break
+        }
+    }
+    if (-not $vcpkgRoot) {
+        throw 'vcpkg.exe was not found. Use a GitHub-hosted Windows runner or set VCPKG_ROOT.'
+    }
 
-$vcpkgTriplet = 'x64-windows-static-md'
-& (Join-Path $vcpkgRoot 'vcpkg.exe') install "openssl:$vcpkgTriplet" --clean-after-build
-if ($LASTEXITCODE -ne 0) {
-    throw "The static OpenSSL build failed (exit code $LASTEXITCODE)."
-}
-$env:VCPKG_ROOT = $vcpkgRoot
-$env:VCPKGRS_TRIPLET = $vcpkgTriplet
-$env:OPENSSL_STATIC = '1'
-if ($env:GITHUB_ENV) {
-    Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot" -Encoding utf8
-    Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$vcpkgTriplet" -Encoding utf8
-    Add-Content -Path $env:GITHUB_ENV -Value 'OPENSSL_STATIC=1' -Encoding utf8
+    $vcpkgCommit = & git -C $vcpkgRoot rev-parse HEAD
+    if ($LASTEXITCODE -ne 0 -or $vcpkgCommit -notmatch '^[0-9a-f]{40}$') {
+        throw 'Could not identify the vcpkg registry commit.'
+    }
+    $vcpkgTriplet = 'x64-windows-static-md'
+    # vcpkg automatically respects VCPKG_DEFAULT_BINARY_CACHE from CI.
+    & (Join-Path $vcpkgRoot 'vcpkg.exe') install "openssl:$vcpkgTriplet" --clean-after-build
+    if ($LASTEXITCODE -ne 0) {
+        throw "The static OpenSSL build failed (exit code $LASTEXITCODE)."
+    }
+    $env:VCPKG_ROOT = $vcpkgRoot
+    $env:VCPKGRS_TRIPLET = $vcpkgTriplet
+    $env:OPENSSL_STATIC = '1'
+    $env:SEQUOIA_VCPKG_COMMIT = $vcpkgCommit
+    if ($env:GITHUB_ENV) {
+        Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot" -Encoding utf8
+        Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$vcpkgTriplet" -Encoding utf8
+        Add-Content -Path $env:GITHUB_ENV -Value 'OPENSSL_STATIC=1' -Encoding utf8
+        Add-Content -Path $env:GITHUB_ENV -Value "SEQUOIA_VCPKG_COMMIT=$vcpkgCommit" -Encoding utf8
+    }
+} else {
+    Write-Host 'OpenSSL is not required for this component; skipping vcpkg setup.'
 }
 
 # Stage these DLLs alongside the utilities so the portable archive also
