@@ -39,7 +39,8 @@ def publish(downloads):
         run(["gh", "release", "create", tag, "--draft", "--target", manifest["pipeline_commit"],
              "--title", "Sequoia for Windows x64 (" + tag + ")", "--notes-file", downloads / "release-notes.md"])
     run(["gh", "release", "upload", tag, "--clobber", *[downloads / name for name in sorted(expected)]])
-    run(["gh", "release", "edit", tag, "--draft=false", "--latest", "--notes-file", downloads / "release-notes.md"])
+    run(["gh", "release", "edit", tag, "--draft=false", "--prerelease=false", "--latest",
+         "--notes-file", downloads / "release-notes.md"])
 
 
 def main():

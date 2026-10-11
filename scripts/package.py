@@ -67,14 +67,16 @@ def finish(report, staging, output):
     filename = "sequoia-all-windows-x86_64.zip"
     create_zip(staging, output / filename)
     (output / "sources.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    binary_count = sum(len(project["binaries"]) for project in report["projects"])
     notes = ["Native Windows x64 builds of the latest stable Sequoia utility releases.", "",
-             "Download `sequoia-all-windows-x86_64.zip` for all eight executables, or a component ZIP.", "",
+             f"Download `sequoia-all-windows-x86_64.zip` for all {binary_count} executables, or a component ZIP.", "",
              "| Project | Upstream tag | Commit |", "| --- | --- | --- |"]
     for project in report["projects"]:
         notes.append(f"| {project['repository']} | {project['tag']} | [{project['commit'][:12]}]({project['source_url']}) |")
     notes += ["", "Built with Windows CNG. OpenSSL is linked statically; Microsoft runtime DLLs are included.",
               "Chameleon and its GnuPG-agent dependency include the documented Windows compatibility patches.",
               "`gpg-sq` secret-key operations require a separately installed native GnuPG (`gpg-agent` and `gpgconf`).",
+              "`sq-cryptoki` token operations require a separately installed vendor PKCS#11 module and device.",
               "Foreground Parcimonie is supported; Unix daemonization is unavailable on Windows.",
               "", "The bundles include upstream source, applied patches, licenses, Cargo lockfiles and build provenance.",
               "SHA256 checksums are in `SHA256SUMS`. Binaries are not Authenticode-signed."]

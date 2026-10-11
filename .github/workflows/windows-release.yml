@@ -114,7 +114,7 @@ jobs:
           "UPSTREAM_COMMIT=$($resolvedProject.commit)" >> $env:GITHUB_ENV
           "RUNNER_IMAGE=$env:ImageVersion" >> $env:GITHUB_ENV
       - name: Restore static OpenSSL build cache
-        if: contains(fromJSON('["sq", "chameleon", "wot"]'), matrix.project)
+        if: contains(fromJSON('["sq", "chameleon", "wot", "cryptoki"]'), matrix.project)
         id: vcpkg-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -126,7 +126,7 @@ jobs:
           PROJECT: ${{ matrix.project }}
         run: ./scripts/setup-windows.ps1 -SkipOpenSsl:($env:PROJECT -in @('sqv', 'sop', 'keystore'))
       - name: Save static OpenSSL build cache
-        if: contains(fromJSON('["sq", "chameleon", "wot"]'), matrix.project)
+        if: contains(fromJSON('["sq", "chameleon", "wot", "cryptoki"]'), matrix.project)
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/vcpkg-cache

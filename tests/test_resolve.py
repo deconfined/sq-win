@@ -101,6 +101,14 @@ class StableReleaseTests(unittest.TestCase):
         ])
         self.assertEqual(release, {"version": "0.3.0", "tag": "server/v0.3.0", "commit": COMMIT_B})
 
+    def test_cryptoki_selects_stable_cli_release_not_a_library_tag(self):
+        release = self.select("cryptoki", [
+            tag("sequoia-cryptoki/v99.0.0"), tag("v99.0.0"),
+            tag("sq-cryptoki/v0.1.0"), tag("sq-cryptoki/v0.2.0", COMMIT_B),
+            tag("sq-cryptoki/v0.3.0-pqc.1"),
+        ])
+        self.assertEqual(release, {"version": "0.2.0", "tag": "sq-cryptoki/v0.2.0", "commit": COMMIT_B})
+
     def test_wot_considers_plain_and_component_release_tags(self):
         release = self.select("wot", [
             tag("v0.15.0"), tag("sequoia-wot/v0.15.2", COMMIT_B),

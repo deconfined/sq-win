@@ -9,6 +9,7 @@ This repository builds the latest stable upstream Sequoia releases with GitHub A
 | [sequoia-sqv](https://gitlab.com/sequoia-pgp/sequoia-sqv) | `sqv.exe` |
 | [sequoia-sop](https://gitlab.com/sequoia-pgp/sequoia-sop) | `sqop.exe`, `sqopv.exe` |
 | [sequoia-wot](https://gitlab.com/sequoia-pgp/sequoia-wot) | `sq-wot.exe` |
+| [sequoia-cryptoki](https://gitlab.com/sequoia-pgp/sequoia-cryptoki) | `sq-cryptoki.exe` |
 | [sequoia-keystore](https://gitlab.com/sequoia-pgp/sequoia-keystore) | `sequoia-keystore.exe` (optional server) |
 
 ## READ THIS
@@ -37,7 +38,7 @@ A daily schedule checks for new stable upstream versions. It skips an already co
 
 ## How releases are selected and built
 
-[projects.json](projects.json) specifies the six projects, Cargo packages, feature sets and expected executables. The resolver reads all pages of GitLab tags and chooses the highest numeric `major.minor.patch` release. It excludes prereleases and experimental suffixes. It understands both plain and component-specific tags, including `sequoia-sq/v1.5.0`, and chooses `server/v…` for the keystore executable rather than a library/backend tag. `sq-wot` is built from the latest stable WOT source tag; its tools package has a separate version.
+[projects.json](projects.json) specifies the seven projects, Cargo packages, feature sets and expected executables. The resolver reads all pages of GitLab tags and chooses the highest numeric `major.minor.patch` release. It excludes prereleases and experimental suffixes. It understands both plain and component-specific tags, including `sequoia-sq/v1.5.0`, and chooses `server/v…` for the keystore executable rather than a library/backend tag. `sq-cryptoki` selects its own `sq-cryptoki/v…` tool releases rather than the `sequoia-cryptoki/v…` library releases. `sq-wot` is built from the latest stable WOT source tag; its tools package has a separate version.
 
 Resolution pins each tag to its exact commit. Each Windows job fetches that tag and rejects a changed commit. The jobs build on `windows-2022` for `x86_64-pc-windows-msvc`, using stable Rust, Windows CNG, bundled SQLite, and upstream Cargo lockfiles. Cap'n Proto's compiler is downloaded from its official site with a pinned SHA256. Hickory DNSSEC makes OpenSSL necessary even with CNG; vcpkg provides static OpenSSL libraries with the Microsoft dynamic C runtime. The ZIPs include the corresponding app-local Microsoft runtime DLLs.
 
@@ -46,9 +47,10 @@ The action definitions are pinned to the latest stable releases verified on Octo
 Each component's executables are launched from its packaged directory with development directories removed from `PATH`. The assembly job requires every component and checks their provenance and binary hashes. It then tests:
 
 - SOP key generation, signing, encryption and decryption.
-- Valid detached signatures through `sq`, `sqop`, `sqopv`, `sqv`, and `gpgv-sq`.
+- Detached signatures created by SOP and `gpg-sq`, verified through `sq`, `sqop`, `sqopv`, `sqv`, `gpgv-sq`, and native GnuPG.
 - Rejection of a modified signed message through every verifier.
 - Web-of-trust authentication and DOT output with `sq-wot`.
+- Version reporting and token enumeration with `sq-cryptoki` and an empty module configuration.
 - Native GnuPG-agent key import and signing through `gpg-sq`, including Windows file-descriptor options.
 
 The integration job installs a checksum-pinned native GnuPG runtime for testing. GnuPG itself is not redistributed in these ZIPs.
@@ -64,6 +66,8 @@ The latest stable Chameleon release, `v0.13.1`, contains unguarded Unix code and
 These are downstream Windows builds, with the modifications recorded in each project's `share/<project>/build.json`. If a future stable release no longer matches a patch, the pipeline stops for review; it never falls back to an older version or publishes a partial collection.
 
 `gpg-sq` secret-key operations require a separately installed native Windows GnuPG with `gpg-agent`, `gpgconf`, and pinentry for interactive prompts. Put GnuPG's `bin` directory on `PATH`. `gpgv-sq` verification does not need an agent. Chameleon's Parcimonie can run in the foreground; Unix daemonization/autostart is unavailable on Windows. The development recorder is excluded. `sq` can use its embedded keystore without installing the optional server.
+
+`sq-cryptoki` manages PKCS#11 tokens. Token operations require a separately installed vendor PKCS#11 DLL, selected with `--module`. Vendor drivers and token hardware are not included. Upstream currently disables its Windows CI jobs; this pipeline builds and probes the Windows CLI, while hardware interoperability remains untested. The bundled `sq` and keystore server use the default software-key and GnuPG-agent backends; their optional PKCS#11, OpenPGP-card and TPM backends are not enabled.
 
 ## Download contents and provenance
 
@@ -89,4 +93,4 @@ rustup target add x86_64-pc-windows-msvc
 python scripts/build_project.py --project sq
 ```
 
-Project identifiers are `sq`, `chameleon`, `sqv`, `sop`, `wot`, and `keystore`. The setup script exports dependency variables into the current PowerShell session and, in CI, into subsequent Actions steps. The workflow is [windows-release.yml](.github/workflows/windows-release.yml).
+Project identifiers are `sq`, `chameleon`, `sqv`, `sop`, `wot`, `cryptoki`, and `keystore`. The setup script exports dependency variables into the current PowerShell session and, in CI, into subsequent Actions steps. The workflow is [windows-release.yml](.github/workflows/windows-release.yml).

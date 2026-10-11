@@ -50,6 +50,16 @@
     "patches": []
   },
   {
+    "id": "cryptoki",
+    "repository": "sequoia-cryptoki",
+    "tag_patterns": ["^sq-cryptoki/v?(\\d+)\\.(\\d+)\\.(\\d+)$"],
+    "package": "sq-cryptoki",
+    "manifest": "tools/Cargo.toml",
+    "features": ["sequoia-openpgp/crypto-cng", "sequoia-openpgp/compression"],
+    "binaries": {"sq-cryptoki": ["--home", "none", "version"]},
+    "patches": []
+  },
+  {
     "id": "keystore",
     "repository": "sequoia-keystore",
     "tag_patterns": ["^server/v?(\\d+)\\.(\\d+)\\.(\\d+)$"],

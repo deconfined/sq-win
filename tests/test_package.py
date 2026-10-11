@@ -37,12 +37,10 @@ def digest(data):
 
 def sources_manifest():
     projects = json.loads((ROOT / "projects.json").read_text())
-    versions = {"sq": "1.5.0", "chameleon": "0.13.1", "sqv": "1.5.0",
-                "sop": "0.38.0", "wot": "0.15.3", "keystore": "0.3.0"}
     for index, project in enumerate(projects, 1):
-        project["version"] = versions[project["id"]]
+        project["version"] = f"1.{index}.0"
         project["tag"] = ("server/v" if project["id"] == "keystore" else "v") + project["version"]
-        project["commit"] = str(index) * 40
+        project["commit"] = f"{index:040x}"
         base = "https://gitlab.com/sequoia-pgp/" + project["repository"]
         project["url"] = base + ".git"
         project["source_url"] = base + "/-/tree/" + project["commit"]
@@ -367,7 +365,8 @@ class PublishTests(unittest.TestCase):
         gh.assert_not_called()
 
     def test_existing_draft_uploads_the_complete_set_before_publishing(self):
-        with mock.patch.object(publisher, "find_release", return_value=github_release(self.manifest, draft=True)), \
+        with mock.patch.object(publisher, "find_release",
+                               return_value=github_release(self.manifest, draft=True, prerelease=True)), \
                 mock.patch.object(publisher, "run") as gh:
             self.publish()
         calls = [call.args[0] for call in gh.call_args_list]
@@ -375,6 +374,7 @@ class PublishTests(unittest.TestCase):
         self.assertIn("--clobber", calls[0])
         self.assertEqual({path.name for path in calls[0] if isinstance(path, Path)}, download_names(self.manifest))
         self.assertIn("--draft=false", calls[1])
+        self.assertIn("--prerelease=false", calls[1])
 
     def test_new_release_stays_draft_until_all_assets_have_uploaded(self):
         with mock.patch.object(publisher, "find_release", return_value=None), mock.patch.object(publisher, "run") as gh:
@@ -384,6 +384,7 @@ class PublishTests(unittest.TestCase):
         self.assertIn("--draft", calls[0])
         self.assertEqual(calls[0][calls[0].index("--target") + 1], PIPELINE_COMMIT)
         self.assertIn("--draft=false", calls[-1])
+        self.assertIn("--prerelease=false", calls[-1])
 
     def test_upload_failure_never_publishes_the_new_draft(self):
         failure = subprocess.CalledProcessError(1, ["gh", "release", "upload"])
