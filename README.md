@@ -11,6 +11,18 @@ This repository builds the latest stable upstream Sequoia releases with GitHub A
 | [sequoia-wot](https://gitlab.com/sequoia-pgp/sequoia-wot) | `sq-wot.exe` |
 | [sequoia-keystore](https://gitlab.com/sequoia-pgp/sequoia-keystore) | `sequoia-keystore.exe` (optional server) |
 
+## READ THIS
+
+I made this pipeline so that I have easy access to Windows-compatible binaries. Anyone is welcome to download these, but...
+
+**You have no reason to trust these builds!**
+
+This build pipeline has no association whatsoever with the Sequoia project.
+
+It may not select the right version (it might grab an old version, or it might grab an unstable version), the builds may not work correctly for some reason, or I could have done something nefarious in the build pipeline. (I didn't, but that's exactly what someone who did would say!)
+
+Use at your own risk.
+
 ## Run the pipeline
 
 Push this repository to GitHub with `main` as its default branch. No personal access token or additional repository secret is required.
