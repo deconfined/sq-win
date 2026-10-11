@@ -63,6 +63,8 @@ The latest stable Chameleon release, `v0.13.1`, contains unguarded Unix code and
 
 [gpg-agent-windows.patch](patches/gpg-agent-windows.patch) fixes the locked `sequoia-gpg-agent` dependency's unnecessary use of MSYS2 `cygpath` for native Windows paths. The build copies the exact locked crate source into a local path override, applies this patch, and permits only that dependency's source/checksum to change in the build lockfile. Unrelated package changes fail the job. Original and build lockfiles, dependency source, and patches are included in the downloads.
 
+[gpg-agent-ecc-checksum.patch](patches/gpg-agent-ecc-checksum.patch) backports the upstream 0.6.2 ECC import checksum fix into Chameleon's locked 0.6.0 dependency. It uses the native GnuPG version to select the correct transfer checksum, so an unattended key import remains usable for signing. Dependencies already at 0.6.2 contain this fix and do not receive the backport.
+
 These are downstream Windows builds, with the modifications recorded in each project's `share/<project>/build.json`. If a future stable release no longer matches a patch, the pipeline stops for review; it never falls back to an older version or publishes a partial collection.
 
 `gpg-sq` secret-key operations require a separately installed native Windows GnuPG with `gpg-agent`, `gpgconf`, and pinentry for interactive prompts. Put GnuPG's `bin` directory on `PATH`. `gpgv-sq` verification does not need an agent. Chameleon's Parcimonie can run in the foreground; Unix daemonization/autostart is unavailable on Windows. The development recorder is excluded. `sq` can use its embedded keystore without installing the optional server.

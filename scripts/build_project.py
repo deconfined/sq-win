@@ -138,10 +138,17 @@ def build(manifest, project_id, work, output):
         version = dependency["version"]
         destination = source / "vendor" / ("sequoia-gpg-agent-" + version)
         shutil.copytree(Path(dependency["manifest_path"]).parent, destination)
-        path = ROOT / "patches" / "gpg-agent-windows.patch"
-        status = apply_patch(source, path, destination.relative_to(source))
-        patches.append({"file": "patches/gpg-agent-windows.patch", "sha256": sha256(path),
-                        "dependency": "sequoia-gpg-agent", "version": version, "status": status})
+        dependency_patches = ["patches/gpg-agent-windows.patch"]
+        if version == "0.6.0":
+            # Stable Chameleon locks 0.6.0. Backport 0.6.2's GnuPG-version-aware
+            # ECC transfer checksum; unattended import otherwise stores a key
+            # whose checksum fails when the native agent signs with it.
+            dependency_patches.append("patches/gpg-agent-ecc-checksum.patch")
+        for name in dependency_patches:
+            path = ROOT / name
+            status = apply_patch(source, path, destination.relative_to(source))
+            patches.append({"file": name, "sha256": sha256(path),
+                            "dependency": "sequoia-gpg-agent", "version": version, "status": status})
         key = "patch.crates-io.sequoia-gpg-agent-" + version.replace(".", "-")
         overrides.extend(["--config", key + '.package="sequoia-gpg-agent"',
                           "--config", key + ".path=" + json.dumps(destination.as_posix())])

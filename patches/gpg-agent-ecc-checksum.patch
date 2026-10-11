@@ -1,0 +1,202 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -298,6 +298,9 @@
+     c: assuan::Client,
+     pinentry_mode: Option<PinentryMode>,
+ 
++    /// Agent version.
++    version: String,
++
+     /// Whether this is an restricted connection.
+     restricted: bool,
+ }
+@@ -434,6 +437,7 @@
+             c: connection,
+             pinentry_mode: None,
+             restricted: false,
++            version: "unknown".into(),
+         };
+ 
+         // Check whether this is an restricted connection.
+@@ -441,7 +445,34 @@
+             agent.send_simple("GETINFO restricted").await.is_ok();
+         agent.restricted = restricted;
+ 
++        if let Ok(v) = agent.get_agent_version().await {
++            agent.version = v;
++        }
++
+         Ok(agent)
++    }
++
++    /// Returns the keys managed by the agent.
++    async fn get_agent_version(&mut self) -> Result<String> {
++        self.send("GETINFO version")?;
++
++        let mut version = Vec::new();
++        while let Some(response) = self.next().await {
++            let response = response?;
++            match response {
++                Response::Ok { .. } => break,
++                Response::Comment { .. } => (),
++                Response::Data { partial } =>
++                    version.extend_from_slice(&partial[..]),
++                Response::Error { message, .. } =>
++                    return self.operation_failed(&message).await,
++                response =>
++                    return protocol_error(&response),
++            }
++        }
++
++        self.next().await; // Dummy read to send END.
++        Ok(String::from_utf8(version).map_err(|e| e.utf8_error())?)
+     }
+ 
+     /// Returns whether this is an restricted connection.
+@@ -615,33 +646,6 @@
+                         overwrite: bool)
+                         -> Result<bool>
+     {
+-        // The gpg-agent shipped with GnuPG 2.4.x calculates the checksum
+-        // over ECC artifacts differently.  Oddly, this seems to amount to
+-        // adding 8 to the checksum.  See GnuPG commit
+-        // 2b118516240b4bddd34c68c23a99bea56682a509.
+-        use sequoia_openpgp::types::PublicKeyAlgorithm::*;
+-        let mut r = self.import_int(
+-            policy, cert, key, unattended, overwrite, 0).await;
+-        if r.is_err() && (key.pk_algo() == ECDSA
+-                          || key.pk_algo() == EdDSA
+-                          || key.pk_algo() == ECDH)
+-        {
+-            r = self.import_int(
+-                policy, cert, key, unattended, overwrite, 8).await;
+-        }
+-
+-        r
+-    }
+-
+-    async fn import_int(&mut self,
+-                        policy: &dyn Policy,
+-                        cert: &Cert,
+-                        key: &Key<SecretParts, UnspecifiedRole>,
+-                        unattended: bool,
+-                        overwrite: bool,
+-                        csum_offset: u16)
+-                        -> Result<bool>
+-    {
+         use ipc::sexp::*;
+ 
+         let keygrip = Keygrip::of(key.mpis())?;
+@@ -680,6 +684,42 @@
+             *checksum = checksum.wrapping_add(
+                 mpi.to_vec().expect("infallible").iter()
+                     .fold(0u16, |acc, v| acc.wrapping_add(*v as u16)));
++        }
++
++        fn add_ecc_scalar(list: &mut Vec<Sexp>,
++                          mode: EccScalarChecksumMode,
++                          checksum: &mut u16,
++                          s: &mpi::ProtectedMPI)
++        {
++            match mode {
++                EccScalarChecksumMode::MPI =>
++                    addp(list, checksum, s),
++
++                EccScalarChecksumMode::SOS => {
++                    let mut v = s.value().to_vec();
++
++                    // If the high bit is set, we need to prepend a
++                    // zero byte, otherwise the agent will interpret
++                    // the value as signed, and thus negative.
++                    if *v.get(0).unwrap_or(&0) & 0x80 > 0 {
++                        v.insert(0, 0);
++                    }
++
++                    add_raw(list, "_", &v);
++
++                    // Compute the bit length.
++                    let nbits = v.len() as u32 * 8
++                        - s.value().get(0).map(|o| o.leading_zeros())
++                        .unwrap_or(0);
++
++                    // Compute the checksum.
++                    *checksum = checksum
++                        .wrapping_add(nbits as u16 >> 8)
++                        .wrapping_add(nbits as u16 & 0xff)
++                        .wrapping_add(v.iter().fold(
++                            0u16, |acc, v| acc.wrapping_add(*v as u16)));
++                },
++            }
+         }
+ 
+         fn add_raw(list: &mut Vec<Sexp>, name: &str, data: &[u8]) {
+@@ -793,10 +833,15 @@
+                     mpi::SecretKeyMaterial::DSA { x, }
+                     | mpi::SecretKeyMaterial::ElGamal { x, } =>
+                         addp(&mut skey, &mut checksum, x),
++
+                     mpi::SecretKeyMaterial::EdDSA { scalar, }
+                     | mpi::SecretKeyMaterial::ECDSA { scalar, }
+-                    | mpi::SecretKeyMaterial::ECDH { scalar, } =>
+-                        addp(&mut skey, &mut checksum, scalar),
++                    | mpi::SecretKeyMaterial::ECDH { scalar, } => {
++                        let mode = EccScalarChecksumMode::for_version(
++                            &self.version);
++                        add_ecc_scalar(&mut skey, mode, &mut checksum, scalar);
++                    },
++
+                     mpi::SecretKeyMaterial::Unknown { mpis, rest, } => {
+                         for m in mpis.iter() {
+                             addp(&mut skey, &mut checksum, m);
+@@ -821,7 +866,7 @@
+             transfer_key.push(s("curve", curve.to_string()));
+         }
+         transfer_key.push(Sexp::List(skey));
+-        transfer_key.push(s("csum", checksum.wrapping_add(csum_offset)));
++        transfer_key.push(s("csum", checksum));
+         transfer_key.push(protection);
+ 
+         let transfer_key = Sexp::List(transfer_key);
+@@ -1278,6 +1323,41 @@
+         let (key, _) = key.add_secret(secret_key.into());
+ 
+         Ok(key)
++    }
++}
++
++/// ECC scalar checksum computation.
++///
++/// The gpg-agent shipped with GnuPG 2.4.x calculates the checksum
++/// over ECC scalars differently.  This is side-effect of the
++/// premature introduction of the simple-octet-string (SOS) encoding
++/// into the GnuPG code.
++///
++/// See GnuPG commit 2b118516240b4bddd34c68c23a99bea56682a509.
++enum EccScalarChecksumMode {
++    /// Sum over the MPI wire encoding in u16.
++    MPI,
++
++    /// Sum over the "opaque MPI encoding" and its bit length in u16.
++    ///
++    /// "Opaque MPI" is a gcrypt mode for MPIs that don't represent
++    /// integers, and mustn't be used in arithmetic functions.  Oddly
++    /// enough, if the left-most bit is set, gcrypt will prefix it
++    /// with a zero byte, presumably to prevent it from being
++    /// interpreted as a sign-bit.
++    SOS,
++}
++
++impl EccScalarChecksumMode {
++    fn for_version(v: &str) -> EccScalarChecksumMode {
++        if v.starts_with("2.0.")
++            || v.starts_with("2.1.")
++            || v.starts_with("2.2.")
++        {
++            EccScalarChecksumMode::MPI
++        } else {
++            EccScalarChecksumMode::SOS
++        }
+     }
+ }
+ 
