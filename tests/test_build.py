@@ -8,7 +8,53 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from build_project import apply_patch, run
+from build_project import apply_patch, check_lock_change, run, seed_patched_lock
+
+
+class LockedPatchTests(unittest.TestCase):
+    LOCK = b'''version = 4
+
+[[package]]
+name = "sequoia-gpg-agent"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "original-checksum"
+dependencies = ["thiserror 2.0.18"]
+
+[[package]]
+name = "thiserror"
+version = "1.0.69"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "first-checksum"
+
+[[package]]
+name = "thiserror"
+version = "2.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "second-checksum"
+'''
+
+    def test_path_patch_preserves_the_locked_edge_with_an_alternative_version_present(self):
+        patched = seed_patched_lock(self.LOCK, {("sequoia-gpg-agent", "0.6.2")})
+        self.assertIn(b'dependencies = ["thiserror 2.0.18"]', patched)
+        self.assertIn(b'checksum = "first-checksum"', patched)
+        self.assertIn(b'checksum = "second-checksum"', patched)
+        self.assertNotIn(b'checksum = "original-checksum"', patched)
+        check_lock_change(self.LOCK, patched, {("sequoia-gpg-agent", "0.6.2")})
+
+    def test_guard_rejects_reselecting_an_existing_locked_dependency(self):
+        patched = seed_patched_lock(self.LOCK, {("sequoia-gpg-agent", "0.6.2")})
+        changed = patched.replace(b'dependencies = ["thiserror 2.0.18"]',
+                                  b'dependencies = ["thiserror 1.0.69"]')
+        with self.assertRaises(RuntimeError):
+            check_lock_change(self.LOCK, changed, {("sequoia-gpg-agent", "0.6.2")})
+
+    def test_unknown_or_ambiguous_patch_sources_are_rejected(self):
+        with self.assertRaises(ValueError):
+            seed_patched_lock(self.LOCK, {("sequoia-gpg-agent", "0.6.0")})
+        with self.assertRaises(ValueError):
+            seed_patched_lock(self.LOCK + self.LOCK[self.LOCK.index(b'[[package]]'):],
+                              {("sequoia-gpg-agent", "0.6.2")})
 
 
 class ProcessEncodingTests(unittest.TestCase):

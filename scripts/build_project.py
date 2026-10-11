@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tarfile
@@ -53,6 +54,31 @@ def check_lock_change(before, after, patched_packages):
             package.pop("checksum", None)
     if original != actual:
         raise RuntimeError("Applying dependency patches changed unrelated locked dependencies")
+
+
+def seed_patched_lock(before, patched_packages):
+    """Keep every locked dependency edge while changing the patched package source."""
+    parts = re.split(r"(?m)(?=^\[\[package\]\]\r?$)", before.decode("utf-8"))
+    found = set()
+    for index, part in enumerate(parts):
+        if not part.startswith("[[package]]"):
+            continue
+        package = tomllib.loads(part)["package"][0]
+        identity = (package["name"], package["version"])
+        if identity not in patched_packages:
+            continue
+        if identity in found or package.get("source") != "registry+https://github.com/rust-lang/crates.io-index":
+            raise ValueError("The patched package must have one locked crates.io source")
+        found.add(identity)
+        # An unlocked re-resolution may choose another already locked version
+        # of a broadly constrained dependency. Pre-seed only this source change,
+        # then let Cargo validate the complete original graph with --locked.
+        parts[index] = re.sub(r"(?m)^(?:source|checksum) = [^\r\n]*\r?\n", "", part)
+    if found != patched_packages:
+        raise ValueError("A patched package was missing from the original lockfile")
+    after = "".join(parts).encode("utf-8")
+    check_lock_change(before, after, patched_packages)
+    return after
 
 
 def create_zip(directory, output):
@@ -121,7 +147,8 @@ def build(manifest, project_id, work, output):
                           "--config", key + ".path=" + json.dumps(destination.as_posix())])
         patched_packages.add((dependency["name"], version))
     if overrides:
-        metadata = json.loads(run(["cargo", "metadata", "--offline", "--format-version=1",
+        (source / "Cargo.lock").write_bytes(seed_patched_lock(original_lock, patched_packages))
+        metadata = json.loads(run(["cargo", "metadata", "--offline", "--locked", "--format-version=1",
                                   *overrides, *metadata_args], cwd=source, env=env, capture=True))
         check_lock_change(original_lock, (source / "Cargo.lock").read_bytes(), patched_packages)
     build_lock_hash = sha256(source / "Cargo.lock")
