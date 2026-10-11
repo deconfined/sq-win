@@ -1,0 +1,5 @@
+.build/
+dist/
+sources.json
+__pycache__/
+*.pyc

@@ -1,0 +1,183 @@
+name: Windows stable releases
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the tested downloads as a GitHub Release
+        type: boolean
+        default: true
+  schedule:
+    - cron: '17 4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-stable-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  validate:
+    name: Validate pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Test release selection and packaging
+        run: python -m unittest discover -s tests -v
+      - name: Parse PowerShell scripts
+        run: |
+          Get-ChildItem scripts/*.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$tokens, [ref]$errors) > $null
+            if ($errors.Count) { throw ($errors | Out-String) }
+          }
+
+  resolve:
+    name: Resolve stable upstream tags
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.sources.outputs.matrix }}
+      release_tag: ${{ steps.sources.outputs.release_tag }}
+      should_build: ${{ steps.status.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Select highest stable version of every component
+        id: sources
+        run: python scripts/resolve.py --github-output $env:GITHUB_OUTPUT
+      - name: Skip an already published scheduled release
+        id: status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/release_status.py --github-output $env:GITHUB_OUTPUT
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: source-manifest
+          path: sources.json
+          if-no-files-found: error
+          retention-days: 30
+
+  build:
+    name: Build ${{ matrix.project }} (Windows x64)
+    needs: resolve
+    if: needs.resolve.outputs.should_build == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: source-manifest
+      - name: Install native build dependencies
+        run: ./scripts/setup-windows.ps1
+      - name: Select stable Rust and the native MSVC target
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          if ($LASTEXITCODE) { throw 'Rust installation failed' }
+          rustup default stable
+          if ($LASTEXITCODE) { throw 'Rust selection failed' }
+          rustup target add x86_64-pc-windows-msvc
+          if ($LASTEXITCODE) { throw 'Rust target installation failed' }
+      - name: Build the pinned release and probe packaged executables
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: python scripts/build_project.py --project $env:PROJECT
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: component-${{ matrix.project }}
+          path: dist/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  package:
+    name: Test and package the complete collection
+    needs: [resolve, build]
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: source-manifest
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: component-*
+          path: artifacts
+      - name: Install native GnuPG for Chameleon integration tests
+        run: ./scripts/setup-gnupg.ps1
+      - name: Validate every component, test cryptography and make ZIPs
+        run: python scripts/package.py --artifacts artifacts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-downloads
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+
+  publish:
+    name: Publish GitHub Release downloads
+    needs: [resolve, package]
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' && inputs.publish))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: windows-downloads
+          path: dist
+      - name: Upload assets to a draft, then publish the complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python scripts/publish.py --downloads dist

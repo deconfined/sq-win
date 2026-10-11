@@ -1,0 +1,62 @@
+[
+  {
+    "id": "sq",
+    "repository": "sequoia-sq",
+    "tag_patterns": ["^v?(\\d+)\\.(\\d+)\\.(\\d+)$", "^sequoia-sq/v?(\\d+)\\.(\\d+)\\.(\\d+)$"],
+    "package": "sequoia-sq",
+    "manifest": "tool/Cargo.toml",
+    "features": ["crypto-cng"],
+    "binaries": {"sq": ["--version"]},
+    "patches": []
+  },
+  {
+    "id": "chameleon",
+    "repository": "sequoia-chameleon-gnupg",
+    "tag_patterns": ["^v?(\\d+)\\.(\\d+)\\.(\\d+)$"],
+    "package": "sequoia-chameleon-gnupg",
+    "manifest": "Cargo.toml",
+    "features": ["crypto-cng", "rusqlite/bundled"],
+    "binaries": {"gpg-sq": ["--version"], "gpgv-sq": ["--version"]},
+    "patches": ["patches/chameleon-windows.patch"]
+  },
+  {
+    "id": "sqv",
+    "repository": "sequoia-sqv",
+    "tag_patterns": ["^v?(\\d+)\\.(\\d+)\\.(\\d+)$"],
+    "package": "sequoia-sqv",
+    "manifest": "Cargo.toml",
+    "features": ["crypto-cng"],
+    "binaries": {"sqv": ["--version"]},
+    "patches": []
+  },
+  {
+    "id": "sop",
+    "repository": "sequoia-sop",
+    "tag_patterns": ["^v?(\\d+)\\.(\\d+)\\.(\\d+)$"],
+    "package": "sequoia-sop",
+    "manifest": "Cargo.toml",
+    "features": ["crypto-cng", "cli", "cliv", "sequoia-openpgp/compression"],
+    "binaries": {"sqop": ["version"], "sqopv": ["version"]},
+    "patches": []
+  },
+  {
+    "id": "wot",
+    "repository": "sequoia-wot",
+    "tag_patterns": ["^v?(\\d+)\\.(\\d+)\\.(\\d+)$", "^sequoia-wot/v?(\\d+)\\.(\\d+)\\.(\\d+)$"],
+    "package": "sequoia-wot-tools",
+    "manifest": "tools/Cargo.toml",
+    "features": ["sequoia-openpgp/crypto-cng", "dot-writer"],
+    "binaries": {"sq-wot": ["--version"]},
+    "patches": []
+  },
+  {
+    "id": "keystore",
+    "repository": "sequoia-keystore",
+    "tag_patterns": ["^server/v?(\\d+)\\.(\\d+)\\.(\\d+)$"],
+    "package": "sequoia-keystore-server",
+    "manifest": "server/Cargo.toml",
+    "features": ["crypto-cng"],
+    "binaries": {"sequoia-keystore": ["--help"]},
+    "patches": []
+  }
+]

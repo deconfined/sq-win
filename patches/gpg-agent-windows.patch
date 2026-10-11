@@ -1,0 +1,35 @@
+--- a/src/gnupg.rs
++++ b/src/gnupg.rs
+@@ -133,13 +133,22 @@
+ 
+         #[cfg(windows)]
+         fn convert_path(path: impl AsRef<OsStr>, mode: Mode) -> Result<PathBuf> {
++            let path = path.as_ref();
++            // Native Windows GnuPG already supplies drive-letter or
++            // UNC paths.  These do not need conversion, and calling
++            // cygpath would introduce an unnecessary MSYS2 dependency.
++            // Unix/Cygwin paths still use cygpath for conversion.
++            if matches!(mode, Mode::Windows)
++                && ! path.to_string_lossy().starts_with('/') {
++                return Ok(PathBuf::from(path));
++            }
+             let conversion_type = match mode {
+                 Mode::Windows => "--windows",
+                 Mode::Unix => "--unix",
+             };
+             Ok(new_background_command("cygpath")
+ 		.arg(conversion_type)
+-		.arg(path.as_ref())
++                .arg(path)
+                 .output()
+                 .map_err(Into::into)
+                 .and_then(|out|
+@@ -149,7 +158,7 @@
+                     } else {
+                         Err(anyhow::anyhow!(
+                             "Executing cygpath encountered error for path {}",
+-                            path.as_ref().to_string_lossy()
++                            path.to_string_lossy()
+                         ))
+                     }
+                 )?)

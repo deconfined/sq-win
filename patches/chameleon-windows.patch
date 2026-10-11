@@ -1,0 +1,231 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 37121ae..f075544 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -19,7 +19,6 @@ anyhow = "1"
+ base64 = ">= 0.21, < 0.23"
+ buffered-reader = { version = "1.4" }
+ chrono = "0.4"
+-daemonize = "0.5"
+ dirs = ">=5, <7"
+ fd-lock = { version = ">= 3, < 5", default-features = false }
+ filetime = "0.2"
+@@ -50,6 +49,9 @@ tempfile = "3"
+ thiserror = ">=1, <3"
+ tokio = { version = "1.19", features = [ "rt-multi-thread", "io-util", "net", "process", "io-std", "fs" ] }
+ 
++[target.'cfg(unix)'.dependencies]
++daemonize = "0.5"
++
+ [build-dependencies]
+ anyhow = "1"
+ clap = "4.4.18"
+diff --git a/src/argparse/utils.rs b/src/argparse/utils.rs
+index 559a466..68fe419 100644
+--- a/src/argparse/utils.rs
++++ b/src/argparse/utils.rs
+@@ -35,30 +35,31 @@ pub fn file_sink_from_fd(fd: i64) -> Result<fs::File> {
+             })
+         },
+         windows => {
+-            unimplemented!()
++            use std::os::windows::io::{BorrowedHandle, RawHandle};
++            let fd: libc::c_int = fd.try_into().context(
++                format!("Not a valid file descriptor: {}", fd))?;
++            anyhow::ensure!(fd >= 0, "Not a valid file descriptor: {}", fd);
++            let handle = unsafe { libc::get_osfhandle(fd) };
++            anyhow::ensure!(handle != -1 && handle != -2 && handle != 0,
++                            "Not a valid file descriptor: {}", fd);
++            // Rust Files own Windows handles, whereas inherited GnuPG
++            // descriptors belong to the CRT.  Duplicate the handle so
++            // dropping the File leaves the original descriptor usable.
++            let handle = unsafe {
++                BorrowedHandle::borrow_raw(handle as RawHandle)
++            }.try_clone_to_owned()?;
++            Ok(fs::File::from(handle))
+         },
+     }
+ }
+ 
+ /// Creates an io::Read from the given file descriptor.
+ pub fn source_from_fd(fd: i64) -> Result<fs::File> {
+-    platform! {
+-        unix => {
+-            use std::os::unix::io::FromRawFd;
+-            let fd = fd.try_into().context(
+-                format!("Not a valid file descriptor: {}", fd))?;
+-            check_fd(fd)?;
+-            Ok(unsafe {
+-                fs::File::from_raw_fd(fd)
+-            })
+-        },
+-        windows => {
+-            unimplemented!()
+-        },
+-    }
++    file_sink_from_fd(fd)
+ }
+ 
+ /// Checks whether the given descriptor is valid.
++#[cfg(unix)]
+ fn check_fd(fd: std::os::fd::RawFd) -> Result<()> {
+     unsafe {
+         // Try to dup(2) it.
+diff --git a/src/gpg.rs b/src/gpg.rs
+index 0eaf60e..ef329dc 100644
+--- a/src/gpg.rs
++++ b/src/gpg.rs
+@@ -413,12 +413,15 @@ impl<'store> Config<'store> {
+                 }
+             }
+         }
+-        let ttyname = unsafe { libc::ttyname(0) };
+-        if ! ttyname.is_null() {
+-            let ttyname = unsafe { std::ffi::CStr::from_ptr(ttyname) };
+-            agent.send_simple(format!(
+-                "OPTION ttyname={}",
+-                String::from_utf8_lossy(ttyname.to_bytes()))).await?;
++        #[cfg(unix)]
++        {
++            let ttyname = unsafe { libc::ttyname(0) };
++            if ! ttyname.is_null() {
++                let ttyname = unsafe { std::ffi::CStr::from_ptr(ttyname) };
++                agent.send_simple(format!(
++                    "OPTION ttyname={}",
++                    String::from_utf8_lossy(ttyname.to_bytes()))).await?;
++            }
+         }
+         if let Ok(term) = std::env::var("TERM") {
+             agent.send_simple(format!("OPTION ttytype={}", term)).await?;
+@@ -2474,11 +2477,12 @@ fn real_main() -> anyhow::Result<()> {
+         }
+         opt.static_passphrase = Some(password.into()).into();
+ 
+-        // Explicitly leak the File here by turning it into a file
+-        // descriptor to avoid closing the stream.  We may still want
+-        // to read data from this stream later.
+-        use std::os::unix::io::IntoRawFd;
+-        let _ = pwfd.into_raw_fd();
++        // On Unix the File owns the original descriptor.  Keep it
++        // open because we may still read data from the stream later.
++        // Windows Files own a duplicate handle, so dropping them
++        // leaves the original CRT descriptor open.
++        #[cfg(unix)]
++        std::mem::forget(pwfd);
+     }
+ 
+     // Read dirmngr's configuration.  We honor some of the options
+diff --git a/src/gpgv.rs b/src/gpgv.rs
+index cad7aa4..8ad91b7 100644
+--- a/src/gpgv.rs
++++ b/src/gpgv.rs
+@@ -26,6 +26,7 @@ pub mod io;
+ use argparse::Argument;
+ pub mod babel;
+ pub mod clock;
++pub mod homedir;
+ pub mod common;
+ pub mod error_codes;
+ pub mod keydb;
+@@ -80,9 +81,8 @@ impl<'store> Config<'store> {
+             homedir: std::env::var_os("GNUPGHOME")
+                 .filter(|v| ! v.is_empty())
+                 .map(Into::into)
+-                .unwrap_or_else(|| dirs::home_dir()
+-                                .expect("cannot get user's home directory")
+-                                .join(".gnupg")),
++                .map(Ok)
++                .unwrap_or_else(homedir::default)?,
+             ignore_time_conflict: false,
+             keydb: keydb::KeyDB::for_gpgv(),
+             list_sigs: false,
+diff --git a/src/homedir.rs b/src/homedir.rs
+index 3b0ea3f..52be971 100644
+--- a/src/homedir.rs
++++ b/src/homedir.rs
+@@ -5,7 +5,15 @@ use anyhow::Result;
+ 
+ /// Computes the default home directory.
+ pub fn default() -> Result<PathBuf> {
+-    // XXX: Support Windows, see #29.
+-    Ok(dirs::home_dir().ok_or(anyhow::anyhow!("unsupported platform"))?
+-       .join(".gnupg"))
++    #[cfg(unix)]
++    {
++        Ok(dirs::home_dir().ok_or(anyhow::anyhow!("unsupported platform"))?
++           .join(".gnupg"))
++    }
++    #[cfg(windows)]
++    {
++        Ok(dirs::data_dir().ok_or(anyhow::anyhow!(
++            "cannot find the user's application data directory"))?
++           .join("gnupg"))
++    }
+ }
+diff --git a/src/io.rs b/src/io.rs
+index 0a2b0fd..acbe463 100644
+--- a/src/io.rs
++++ b/src/io.rs
+@@ -97,7 +97,7 @@ pub fn tty_in() -> Box<dyn Read + Send + Sync> {
+         },
+         windows => {
+             // XXX: Open console.
+-            Box::new(io::stdin())
++            Box::new(std::io::stdin())
+         },
+     }
+ }
+@@ -116,7 +116,7 @@ pub fn tty_out() -> Box<dyn Write + Send + Sync> {
+         },
+         windows => {
+             // XXX: Open console.
+-            Box::new(io::stderr())
++            Box::new(std::io::stderr())
+         },
+     }
+ }
+diff --git a/src/parcimonie.rs b/src/parcimonie.rs
+index e7c3d13..3a568cd 100644
+--- a/src/parcimonie.rs
++++ b/src/parcimonie.rs
+@@ -141,6 +141,14 @@ pub fn start(config: &crate::Config, command: Option<CmdOrOpt>) {
+         return;
+     }
+ 
++    #[cfg(windows)]
++    if config.autostart_parcimonie {
++        config.warn(format_args!(
++            "Parcimonie autostart is unavailable on Windows; \
++             run --x-sequoia-parcimonie explicitly"));
++        return;
++    }
++
+     match std::fs::metadata(&config.homedir) {
+         Err(err) => {
+             // Home directory doesn't exist.
+@@ -233,11 +241,20 @@ pub fn cmd_parcimonie_daemonize(config: &mut crate::Config, args: &[String])
+         return Err(anyhow::anyhow!("Expected no argument"));
+     }
+ 
+-    // Daemonize now.  On success, the current process will terminate.
+-    t!("daemonizing, bye!");
+-    daemonize::Daemonize::new().start()?;
+-
+-    cmd_parcimonie(config, args)
++    #[cfg(unix)]
++    {
++        // Daemonize now.  On success, the current process will terminate.
++        t!("daemonizing, bye!");
++        daemonize::Daemonize::new().start()?;
++        cmd_parcimonie(config, args)
++    }
++    #[cfg(windows)]
++    {
++        let _ = config;
++        Err(anyhow::anyhow!(
++            "Parcimonie daemonization is unavailable on Windows; \
++             run --x-sequoia-parcimonie explicitly"))
++    }
+ }
+ 
+ /// Dispatches the Parcimonie command.
