@@ -15,7 +15,7 @@
     "tag_patterns": ["^v?(\\d+)\\.(\\d+)\\.(\\d+)$"],
     "package": "sequoia-chameleon-gnupg",
     "manifest": "Cargo.toml",
-    "features": ["crypto-cng", "rusqlite/bundled"],
+    "features": ["crypto-openssl", "rusqlite/bundled"],
     "binaries": {"gpg-sq": ["--version"], "gpgv-sq": ["--version"]},
     "patches": ["patches/chameleon-windows.patch"]
   },

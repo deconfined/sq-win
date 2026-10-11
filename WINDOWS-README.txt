@@ -2,8 +2,9 @@ Sequoia utilities for native Windows x64
 
 Extract the ZIP and add its bin directory to PATH. Keep the accompanying
 Microsoft runtime DLLs beside the executables. No Rust installation is
-required to run the utilities. OpenPGP cryptography uses Windows CNG;
-OpenSSL used for DNSSEC is linked statically.
+required to run the utilities. gpg-sq and gpgv-sq use static OpenSSL for
+OpenPGP cryptography, including GnuPG-compatible user-ID hashes. Other
+components use Windows CNG. OpenSSL used for DNSSEC is also linked statically.
 
 The complete ZIP contains sq.exe, gpg-sq.exe, gpgv-sq.exe, sqv.exe,
 sqop.exe, sqopv.exe, sq-wot.exe, sq-cryptoki.exe and sequoia-keystore.exe.

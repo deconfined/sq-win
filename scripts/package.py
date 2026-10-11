@@ -73,7 +73,8 @@ def finish(report, staging, output):
              "| Project | Upstream tag | Commit |", "| --- | --- | --- |"]
     for project in report["projects"]:
         notes.append(f"| {project['repository']} | {project['tag']} | [{project['commit'][:12]}]({project['source_url']}) |")
-    notes += ["", "Built with Windows CNG. OpenSSL is linked statically; Microsoft runtime DLLs are included.",
+    notes += ["", "OpenPGP uses Windows CNG, except Chameleon uses statically linked OpenSSL for GnuPG hash compatibility.",
+              "OpenSSL used for DNSSEC is also linked statically; Microsoft runtime DLLs are included.",
               "Chameleon and its GnuPG-agent dependency include the documented Windows compatibility patches.",
               "`gpg-sq` secret-key operations require a separately installed native GnuPG (`gpg-agent` and `gpgconf`).",
               "`sq-cryptoki` token operations require a separately installed vendor PKCS#11 module and device.",
