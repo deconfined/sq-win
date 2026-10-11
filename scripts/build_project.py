@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def run(arguments, *, cwd=None, env=None, capture=False):
     print("+ " + " ".join(map(str, arguments)), flush=True)
     result = subprocess.run(list(map(str, arguments)), cwd=cwd, env=env, check=True,
-                            text=capture, stdout=subprocess.PIPE if capture else None)
+                            text=capture, encoding="utf-8" if capture else None,
+                            stdout=subprocess.PIPE if capture else None)
     return result.stdout.strip() if capture else None
 
 
@@ -31,12 +32,12 @@ def sha256(path):
 def apply_patch(source, patch, directory=None):
     arguments = ["--directory", directory.as_posix()] if directory else []
     forward = subprocess.run(["git", "apply", *arguments, "--check", str(patch)], cwd=source,
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, encoding="utf-8")
     if forward.returncode == 0:
         run(["git", "apply", *arguments, str(patch)], cwd=source)
         return "applied"
     reverse = subprocess.run(["git", "apply", *arguments, "--reverse", "--check", str(patch)], cwd=source,
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, encoding="utf-8")
     if reverse.returncode == 0:
         return "already-upstream"
     raise RuntimeError(f"Windows patch {patch.name} needs review for this release:\n{forward.stderr}")
