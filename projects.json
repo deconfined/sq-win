@@ -6,7 +6,7 @@
     "package": "sequoia-sq",
     "manifest": "tool/Cargo.toml",
     "features": ["crypto-cng"],
-    "binaries": {"sq": ["--version"]},
+    "binaries": {"sq": ["version"]},
     "patches": []
   },
   {
